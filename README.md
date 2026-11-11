@@ -214,43 +214,15 @@ The principal question is **when a flow or packet becomes eligible, urgent, or n
 
 The first four and last rows are design examples, not standardized timer names. PDCP/RLC timers belong to their entities even when a shared service implements their storage.
 
-**_Work In Progress_**
+### Claims to avoid when modeling gNB timer events
 
-**Core SR & Uplink Timer Wheel Events**
-
-In a telecom baseband scheduler (such as Ericsson's LTE/5G MAC scheduler), the timer wheel manages the time-bounded states between receiving a PUCCH SR indication and receiving the subsequent PUSCH data or Buffer Status Report (BSR):
-* _SR Prohibit / Re-trigger Window (sr-ProhibitTimer)_: Tracks the cooldown period after a UE transmits an SR before another SR opportunity is evaluated or expected.
-* _UL Grant Response / PUSCH Reception Timeout_: Tracks the expected arrival slot (k2 offset) of the PUSCH transmission after the scheduler issues a DCI Format 0_0 / 0_1 UL grant in response to an SR. If no PUSCH or BSR arrives by that tick, the wheel triggers a grant retry or marks the SR attempt as failed.
-* _Pending SR Aging / Expiration_: Tracks how long an unserved SR has remained in the scheduling queue. If a UE cannot be scheduled immediately due to PDCCH CCE or PRB congestion, the wheel triggers a priority boost or drops the stale SR state after a maximum latency threshold.
-* _Periodic BSR & Retransmission BSR Timers (periodicBSR-Timer, retxBSR-Timer)_: Tracks when a UE is expected to send updated buffer reports once an initial SR-triggered grant has been fulfilled, ensuring the scheduler does not lose track of remaining uplink buffer data.
-* _UE Inactivity & DRX / SR Masking Timers (tInactivityTimer, drx-InactivityTimer)_: Tracks transitions between active scheduling, DRX sleep cycles (where SR opportunities are masked or restricted), and RRC idle release when no further SRs or data arrive.
-* _HARQ Round-Trip & Re-scheduling Timers_: Tracks the slot offset for UL HARQ feedback and synchronous/asynchronous retransmission grants if the initial SR-triggered PUSCH fails CRC decoding.
-
-
-**5G NR gNodeB Scheduler Timer Wheel Events**
-
-The timer wheel event types should align closely with 3GPP TS 38.321 timers and NR physical-layer offsets. **_Need to be checked throughly by me!_**
-
-When inspecting gNodeB MAC scheduler traces for Scheduling Request (SR) and Uplink (UL) grant handling, timer wheel expirations and scheduled ticks typically map to these event categories:
-
-* PUCCH SR Detection to UL Grant (SR_PENDING / SR_PROHIBIT): Triggered when L1 reports an SR on PUCCH Format 0 or 1. The timer wheel enforces _sr-ProhibitTimer_ (per SchedulingRequestConfig) so duplicate SR triggers from the same ulSR ID are ignored while a grant is already in flight.
-* UL Grant to PUSCH Arrival (K2 / PUSCH_EXPECTED): Scheduled at current_slot + K2 when the gNodeB transmits DCI Format 0_0 or 0_1. If L1 does not report a PUSCH decoding result (CRC pass/fail or DTX) at that slot, the timer wheel fires a missing-PUSCH timeout and triggers a fresh UL grant or link-adaptation backoff.
-* Configured Grant (CG) & Periodic BSR (retxBSR-Timer / periodicBSR-Timer): Tracks when a UE must send a new BSR after an SR-triggered PUSCH grant is consumed. If retxBSR-Timer expires on the wheel without a valid UL grant or new data, the gNodeB expects the UE to re-trigger a Regular BSR and a fresh SR.
-* UL HARQ Retransmission & RTT (drx-HARQ-RTT-TimerUL / drx-RetransmissionTimerUL): Scheduled at PUSCH_slot + K2 (or HARQ feedback offset) when a PUSCH fails CRC. The timer wheel holds the HARQ process state until the minimum RTT expires, then marks the HARQ process eligible for an asynchronous UL retransmission grant.
-* DL HARQ Feedback & PUCCH Resource (K1 / PDSCH_HARQ_ACK): Scheduled at PDSCH_slot + K1 to verify that L1 received the ACK/NACK on PUCCH/PUSCH. A wheel timeout here triggers a DL HARQ NACK/DTX assumption and re-queues the DL transport block.
-* C-DRX State Transitions (drx-onDurationTimer / drx-InactivityTimer): Advances the UE between Active Time and DRX Sleep on slot boundaries. In 5G NR, an incoming SR wakes the UE immediately, overriding the DRX sleep timer until the UL grant and drx-InactivityTimer complete.
-* BWP Inactivity & Switching (bwp-InactivityTimer / BWP_SWITCH_DELAY): Tracks slot countdowns to fall back to the defaultDownlinkBWP when no PDCCH/PUSCH activity occurs, as well as the transient RF retuning gap (1–2 slots) during active BWP switches.
-* UE Inactivity & RRC Release (tInactivityTimer): Tracks prolonged periods with zero UL/DL traffic and zero pending SRs, firing an L2 inactivity indication toward CU-CP / RRC to release the UE context to RRC_INACTIVE or RRC_IDLE.
-
-**How to Read These in gNodeB Baseband Traces**
-
-In Ericsson NR baseband traces (e.g., bbmc / l2 / mac trace groups), 
-timer wheel operations usually appear as three distinct actions:
-* **START / INSERT**: Logs the UE_ID (or RNTI), the timer/event type, and the target SFN.Slot (System Frame Number and Slot index) where the wheel bucket sits.
-* **STOP / CANCEL**: Logs early removal from the wheel bucket when an expected event arrives on time (for example, a valid BSR arrives on PUSCH before retxBSR-Timer expires).
-* **EXPIRE / TIMEOUT**: Logs when the wheel cursor reaches the target SFN.Slot and executes the fallback callback (such as re-issuing a UL grant after a PUSCH DTX).
-
-**_Work In Progress_**
+| Unsupported inference | Source-aligned interpretation |
+|---|---|
+| `sr-ProhibitTimer`, `periodicBSR-Timer`, or `retxBSR-Timer` is a gNB timer-wheel event | These timers belong to UE MAC procedures [S2]. A gNB may track observed SR, grant, PUSCH, or BSR activity, but that is separate from running the UE's timer state machine. |
+| K2 is a timeout started by an SR, whose expiry decides whether to retry a grant | K2 relates an uplink grant to its scheduled PUSCH timing [S3]. Reserve that future radio opportunity when making the scheduling decision. Any missing-PUSCH watchdog is implementation-specific; its expiry alone does not prescribe a grant retry or link-adaptation action. |
+| A missing decode indication or HARQ-ACK timeout is equivalent to a NACK | A local watchdog may help detect missing feedback, but its expiry is not proof of a NACK. Resolve HARQ state under the applicable procedure and the implementation's documented policy [S2]. |
+| An SR immediately wakes a UE from DRX, or a generic inactivity expiry releases it to RRC_IDLE/RRC_INACTIVE | DRX Active Time and RRC state transitions follow their own MAC/RRC rules and configuration [S2, S7]. Do not infer either transition from a generic scheduler timer. |
+| Ericsson baseband traces expose generic timer-wheel START/STOP/EXPIRE records with the event names listed above | No public Ericsson trace documentation or source establishing those log groups, fields, or timer-wheel events was identified. Treat such trace descriptions as unverified unless supported by a public, citable source. |
 
 ---
 
