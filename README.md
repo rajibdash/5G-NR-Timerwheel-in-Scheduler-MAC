@@ -257,7 +257,7 @@ The principal question is **which protocol transitions and future radio opportun
 The following illustrates the proposed design and processing order, not a particular vendor's implementation:
 
 ```text
-                    gNB MAC scheduler - each scheduling cycle
+             gNB MAC scheduler - each scheduling cycle
  +-----------------------------------------------------------------+
  |                                                                 |
  |  Slot indication + PHY/control messages                         |
@@ -267,7 +267,7 @@ The following illustrates the proposed design and processing order, not a partic
  |     e.g. ACK received -> cancel corresponding HARQ watchdog     |
  |                  |                                              |
  |                  v                                              |
- |  2. Advance TIMER WHEEL to current radio tick                    |
+ |  2. Advance TIMERWHEEL to current radio tick                    |
  |     +-------------------------------------------------------+   |
  |     | cursor -> current bucket -> collect due event records |   |
  |     +--------------------------+----------------------------+   |
@@ -287,9 +287,10 @@ The following illustrates the proposed design and processing order, not a partic
  |       +-- Reserve future radio resources in RESOURCE CALENDAR   |
  |       +-- Arm/cancel timers in TIMER WHEEL as state changes     |
  +-----------------------------------------------------------------+
+
 ```
 
-The timer wheel says **when an event needs attention**. The scheduler decides **what can be transmitted**, while a separate resource calendar tracks future radio allocations.
+The timerwheel says **when an event needs attention**. The scheduler decides **what can be transmitted**, while a separate resource calendar tracks future radio allocations.
 
 ### How the wheel works
 
@@ -309,9 +310,14 @@ The timer wheel says **when an event needs attention**. The scheduler decides **
   deadline -> due_tick -> bucket_index = due_tick % wheel_size
 ```
 
-Each record stores its **full deadline**, event type and context identity, not just its bucket number. Several events can share a bucket. The cursor advances with time, collecting each crossed bucket; it must not skip intermediate buckets if processing is delayed.
+Each record stores its **full deadline**, event type and context identity, not just its bucket number. 
+Several events can share a bucket. The cursor advances with time, collecting each crossed bucket; 
+it must not skip intermediate buckets if processing is delayed.
 
-For example, with **64 buckets**, a **125 microsecond tick**, and cursor at tick **100**, an event due at tick **106** goes into bucket `106 % 64 = 42`. It is processed when the cursor reaches 106. This bounded wheel covers one revolution, or **8 ms**; a longer timer needs an explicit overflow policy or a different wheel design. See section 3 for the bounded-wheel rules and alternatives.
+For example, with **64 buckets**, a **125 microsecond tick**, and cursor at tick **100**, an event due at tick **106** goes into bucket `106 % 64 = 42`. 
+It is processed when the cursor reaches 106. This bounded wheel covers one revolution, or **8 ms**; 
+a longer timer needs an explicit overflow policy or a different wheel design. 
+See section 3 for the bounded-wheel rules and alternatives.
 
 ### HARQ watchdog example
 
