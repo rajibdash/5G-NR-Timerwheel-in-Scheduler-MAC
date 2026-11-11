@@ -252,6 +252,95 @@ Useful scale reductions:
 
 The principal question is **which protocol transitions and future radio opportunities must be considered at a particular slot or symbol boundary**.
 
+### Timer wheel inside the MAC scheduler
+
+The following illustrates the proposed design and processing order, not a particular vendor's implementation:
+
+```text
+                    gNB MAC scheduler - each scheduling cycle
+ +-----------------------------------------------------------------+
+ |                                                                 |
+ |  Slot indication + PHY/control messages                         |
+ |                  |                                              |
+ |                  v                                              |
+ |  1. Process feedback and context updates                        |
+ |     e.g. ACK received -> cancel corresponding HARQ watchdog     |
+ |                  |                                              |
+ |                  v                                              |
+ |  2. Advance TIMER WHEEL to current radio tick                    |
+ |     +-------------------------------------------------------+   |
+ |     | cursor -> current bucket -> collect due event records |   |
+ |     +--------------------------+----------------------------+   |
+ |                                v                                |
+ |  3. Validate and dispatch expired events                        |
+ |     HARQ watchdog  -> resolve missing-feedback state            |
+ |     DRX boundary   -> refresh expected UE eligibility           |
+ |     RA deadline    -> update random-access procedure state      |
+ |                                |                                |
+ |                                v                                |
+ |  4. Scheduler evaluates eligible UEs, retransmissions, QoS,     |
+ |     available PRBs/symbols and radio constraints                |
+ |                                |                                |
+ |                                v                                |
+ |  5. Commit allocations -> deliver results before PHY deadline   |
+ |       |                                                         |
+ |       +-- Reserve future radio resources in RESOURCE CALENDAR   |
+ |       +-- Arm/cancel timers in TIMER WHEEL as state changes     |
+ +-----------------------------------------------------------------+
+```
+
+The timer wheel says **when an event needs attention**. The scheduler decides **what can be transmitted**, while a separate resource calendar tracks future radio allocations.
+
+### How the wheel works
+
+```text
+              Circular array of bucket heads
+        +-----+-----+-----+-----+-----+-----+
+ index  |  0  |  1  | ... | 42  | 43  | ... |
+        +-----+-----+-----+--+--+--+--+-----+
+                             |     |
+                             v     v
+                       HARQ event  DRX event
+                             |     |
+                             v     v
+                       another    another event
+                       event      (if present)
+
+  deadline -> due_tick -> bucket_index = due_tick % wheel_size
+```
+
+Each record stores its **full deadline**, event type and context identity, not just its bucket number. Several events can share a bucket. The cursor advances with time, collecting each crossed bucket; it must not skip intermediate buckets if processing is delayed.
+
+For example, with **64 buckets**, a **125 microsecond tick**, and cursor at tick **100**, an event due at tick **106** goes into bucket `106 % 64 = 42`. It is processed when the cursor reaches 106. This bounded wheel covers one revolution, or **8 ms**; a longer timer needs an explicit overflow policy or a different wheel design. See section 3 for the bounded-wheel rules and alternatives.
+
+### HARQ watchdog example
+
+```text
+Transmission committed
+       |
+       +-- Reserve applicable future radio resources
+       +-- Arm missing-feedback watchdog for HARQ process
+                         |
+              +----------+-----------+
+              v                      v
+       Valid feedback arrives    Watchdog becomes due
+              |                      |
+       Cancel watchdog           Validate timer generation
+       and update HARQ state     and HARQ context identity
+                                     |
+                                 Apply missing-feedback
+                                 policy and update state
+                                     |
+                                 Scheduler considers
+                                 any eligible work
+```
+
+A timeout means **feedback was not resolved in time**; it is not automatically a NACK or a grant for retransmission. Processing valid, timely feedback before expiry is an example of an explicitly defined precedence rule.
+
+Timer cancellation, stale UE/process identifiers, missed ticks, capacity limits, and bursts of simultaneous expiries all need handling. Insertion and direct removal can be **O(1)**, but processing a bucket with `k` events costs **O(k)** plus handler work.
+
+### Candidate MAC events
+
 | Candidate event type | Ownership and semantics | Scheduler reaction |
 |---|---|---|
 | `HARQ_FEEDBACK_WATCHDOG` | gNB implementation-specific timeout for missing DL HARQ-ACK or UL decoding/CRC indication | Resolve current HARQ state under a documented policy; timeout is not proof of NACK |
