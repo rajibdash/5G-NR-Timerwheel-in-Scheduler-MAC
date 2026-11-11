@@ -214,6 +214,16 @@ The principal question is **when a flow or packet becomes eligible, urgent, or n
 
 The first four and last rows are design examples, not standardized timer names. PDCP/RLC timers belong to their entities even when a shared service implements their storage.
 
+**Core SR & Uplink Timer Wheel Events**
+
+In a telecom baseband scheduler (such as Ericsson's LTE/5G MAC scheduler), the timer wheel manages the time-bounded states between receiving a PUCCH SR indication and receiving the subsequent PUSCH data or Buffer Status Report (BSR):
+* _SR Prohibit / Re-trigger Window (sr-ProhibitTimer)_: Tracks the cooldown period after a UE transmits an SR before another SR opportunity is evaluated or expected.
+* _UL Grant Response / PUSCH Reception Timeout_: Tracks the expected arrival slot (k2 offset) of the PUSCH transmission after the scheduler issues a DCI Format 0_0 / 0_1 UL grant in response to an SR. If no PUSCH or BSR arrives by that tick, the wheel triggers a grant retry or marks the SR attempt as failed.
+* _Pending SR Aging / Expiration_: Tracks how long an unserved SR has remained in the scheduling queue. If a UE cannot be scheduled immediately due to PDCCH CCE or PRB congestion, the wheel triggers a priority boost or drops the stale SR state after a maximum latency threshold.
+* _Periodic BSR & Retransmission BSR Timers (periodicBSR-Timer, retxBSR-Timer)_: Tracks when a UE is expected to send updated buffer reports once an initial SR-triggered grant has been fulfilled, ensuring the scheduler does not lose track of remaining uplink buffer data.
+* _UE Inactivity & DRX / SR Masking Timers (tInactivityTimer, drx-InactivityTimer)_: Tracks transitions between active scheduling, DRX sleep cycles (where SR opportunities are masked or restricted), and RRC idle release when no further SRs or data arrive.
+* _HARQ Round-Trip & Re-scheduling Timers_: Tracks the slot offset for UL HARQ feedback and synchronous/asynchronous retransmission grants if the initial SR-triggered PUSCH fails CRC decoding.
+
 ### Packet delay budget is not a local discard timeout
 
 The 5G QoS Packet Delay Budget concerns the path between the UE and the N6-terminating UPF, not just residence time in a MAC queue [S6, clause 5.7.3.4]. Apply the applicable access-network/core-network budget rules and QoS configuration.
