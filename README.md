@@ -1,4 +1,4 @@
-# 5G NR Timer Wheel in User-Plane and MAC Schedulers
+# 5G NR Timerwheel in User Plane and MAC Schedulers
 
 A timer wheel can be designed as a **circular array of time buckets**, where each bucket contains multiple typed events. Advancing time selects a bucket; expiring an event changes protocol state or makes work eligible. The wheel does **not** itself select a UE, assign PRBs, or guarantee a radio transmission.
 
